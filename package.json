@@ -1,0 +1,9 @@
+{
+  "name": "bignet-broadband-billing",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": {"dev": "vite --host 0.0.0.0", "build": "vite build", "preview": "vite preview --host 0.0.0.0"},
+  "dependencies": {"@supabase/supabase-js": "^2.49.1", "jspdf": "^2.5.2", "xlsx": "0.18.5"},
+  "devDependencies": {"vite": "^6.1.0"}
+}
