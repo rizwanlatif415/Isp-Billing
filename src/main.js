@@ -85,7 +85,13 @@ const ICONS = {
   out: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   wifi: '<path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>',
   refresh: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
-  alert: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>'
+  alert: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+  mail: '<path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><polyline points="22,6 12,13 2,6"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+  eyeoff: '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  trend: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'
 };
 const ic = n => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
 const brandHtml = () => `<div class="brand"><div class="logo">${ic('wifi')}</div><div><b>${esc(BRAND.name)}</b><small>${esc(BRAND.tag)}</small></div></div>`;
@@ -175,22 +181,22 @@ function sendReceiptWhatsApp(paymentId) {
 
 /* ---------------- PDF: bill & receipt ---------------- */
 const NAVY = [11, 31, 58], BLUE = [23, 105, 170], GRAY = [110, 122, 138], INK = [22, 38, 58];
-function billData(b, nameOverride, note) {
-  const c = cmap.get(b.customer_id) || {};
+// Bill / receipt par sirf customer ka naam aur fees print hoti hai (area, phone, username nahi).
+function billData(b, o = {}) {
   const prev = bills.filter(x => x.customer_id === b.customer_id && x.billing_month < b.billing_month).reduce((s, x) => s + due(x), 0);
+  const payable = due(b) + prev;
   return {
     kind: 'bill', no: String(b.id).slice(0, 8).toUpperCase(), date: today(),
-    name: nameOverride ?? c.name ?? '', username: c.username || '-', area: c.area || '-', phone: c.phone || '-', pkg: c.package_name || '-',
-    month: b.billing_month, amount: Number(b.amount), received: Number(b.paid_amount || 0), prev, total: due(b) + prev, status: statusFor(b), note: note || ''
+    name: o.name ?? cmap.get(b.customer_id)?.name ?? '', month: b.billing_month,
+    fee: o.fee ?? (payable > 0 ? payable : Number(b.amount)), note: o.note || ''
   };
 }
-function receiptData(p, nameOverride, note) {
-  const c = cmap.get(p.customer_id) || {}, b = bills.find(x => x.id === p.bill_id);
+function receiptData(p, o = {}) {
+  const b = bills.find(x => x.id === p.bill_id);
   return {
     kind: 'receipt', no: String(p.id).slice(0, 8).toUpperCase(), date: String(p.paid_at).slice(0, 10),
-    name: nameOverride ?? c.name ?? '', username: c.username || '-', area: c.area || '-', phone: c.phone || '-', pkg: c.package_name || '-',
-    month: b?.billing_month || String(p.paid_at).slice(0, 7), amount: Number(p.amount), method: p.method || 'Cash', reference: p.reference || '-',
-    balanceAfter: b ? due(b) : 0, note: note || ''
+    name: o.name ?? cmap.get(p.customer_id)?.name ?? '', month: b?.billing_month || String(p.paid_at).slice(0, 7),
+    fee: o.fee ?? Number(p.amount), note: o.note || ''
   };
 }
 function drawBlock(doc, y, d) {
@@ -204,35 +210,28 @@ function drawBlock(doc, y, d) {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(190, 205, 222);
   doc.text(`${isBill ? 'Bill' : 'Receipt'} No: ${d.no}   |   Date: ${d.date}`, W - 10, y + 16.5, { align: 'right' });
 
-  // left: customer details
-  let ly = y + 30;
-  doc.setTextColor(...GRAY); doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.text(isBill ? 'BILLED TO' : 'RECEIVED FROM', 10, ly);
-  doc.setTextColor(...INK); doc.setFontSize(13); doc.text(doc.splitTextToSize(String(d.name || '-'), 98)[0], 10, ly + 6.5);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
-  [`User ID: ${d.username}`, `Area: ${d.area}`, `Mobile: ${d.phone}`, `Package: ${d.pkg}`].forEach((t, i) => doc.text(doc.splitTextToSize(t, 98)[0], 10, ly + 13 + i * 5.6));
-  let sy = ly + 13 + 4 * 5.6 + 1;
-  if (d.note) { doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY); doc.text(doc.splitTextToSize(d.note, 98)[0], 10, sy); sy += 6; }
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  if (isBill) {
-    const col = d.status === 'Paid' ? [24, 115, 67] : d.status === 'Partial' ? [52, 87, 166] : [196, 100, 10];
-    doc.setTextColor(...col); doc.text(`STATUS: ${d.status.toUpperCase()}`, 10, sy + 2);
-  } else { doc.setTextColor(24, 115, 67); doc.text('PAYMENT RECEIVED - THANK YOU', 10, sy + 2); }
+  // left: customer name only
+  const ly = y + 32;
+  doc.setTextColor(...GRAY); doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.text(isBill ? 'BILLED TO' : 'RECEIVED FROM', 10, ly);
+  const name = String(d.name || '-');
+  let fs = 18; doc.setFont('helvetica', 'bold');
+  while (fs > 10) { doc.setFontSize(fs); if (doc.getTextWidth(name) <= 98) break; fs -= 1; }
+  doc.setTextColor(...INK); doc.setFontSize(fs); doc.text(doc.splitTextToSize(name, 98)[0], 10, ly + 9);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...GRAY);
+  doc.text(`Billing month: ${monthLabel(d.month)}`, 10, ly + 18);
+  let sy = ly + 25;
+  if (d.note) { doc.setFont('helvetica', 'italic'); doc.setFontSize(9.5); doc.text(doc.splitTextToSize(d.note, 98)[0], 10, sy); sy += 7; }
+  if (!isBill) { doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(24, 115, 67); doc.text('PAYMENT RECEIVED - THANK YOU', 10, sy); }
 
-  // right: amounts
-  const rows = isBill
-    ? [['Billing month', monthLabel(d.month)], ['Monthly charges', money(d.amount)], ['Received', money(d.received)], ['Previous balance', money(d.prev)]]
-    : [['Billing month', monthLabel(d.month)], ['Payment method', d.method], ['Reference', String(d.reference).slice(0, 26)], ['Balance remaining', money(d.balanceAfter)]];
-  const hi = isBill ? ['TOTAL PAYABLE', money(d.total)] : ['AMOUNT RECEIVED', money(d.amount)];
-  const rx = 116, rr = 200; let ry = y + 28;
-  doc.setFontSize(9.5);
-  rows.forEach(([l, v]) => {
-    doc.setFont('helvetica', 'normal'); doc.setTextColor(...GRAY); doc.text(l, rx, ry + 4.5);
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(...INK); doc.text(String(v), rr, ry + 4.5, { align: 'right' });
-    doc.setDrawColor(227, 233, 240); doc.line(rx, ry + 7, rr, ry + 7); ry += 8;
-  });
-  doc.setFillColor(232, 241, 250); doc.roundedRect(rx - 3, ry + 1, rr - rx + 6, 11, 2, 2, 'F');
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...BLUE); doc.text(hi[0], rx, ry + 8);
-  doc.setFontSize(12.5); doc.setTextColor(...NAVY); doc.text(hi[1], rr, ry + 8.3, { align: 'right' });
+  // right: fees box
+  const bx = 118, bw = 82, by = y + 29, bh = 36;
+  doc.setFillColor(232, 241, 250); doc.roundedRect(bx, by, bw, bh, 3, 3, 'F');
+  doc.setDrawColor(...BLUE); doc.setLineWidth(0.5); doc.roundedRect(bx, by, bw, bh, 3, 3, 'S'); doc.setLineWidth(0.2);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...BLUE);
+  doc.text(isBill ? 'FEES' : 'AMOUNT RECEIVED', bx + bw / 2, by + 10, { align: 'center' });
+  const amt = money(d.fee); let af = 24;
+  while (af > 12) { doc.setFontSize(af); if (doc.getTextWidth(amt) <= bw - 10) break; af -= 1; }
+  doc.setTextColor(...NAVY); doc.text(amt, bx + bw / 2, by + 25, { align: 'center' });
 
   // footer (support number on every bill/receipt)
   doc.setDrawColor(...BLUE); doc.setLineWidth(0.4); doc.line(10, y + 80, W - 10, y + 80); doc.setLineWidth(0.2);
@@ -257,16 +256,21 @@ function printDoc(doc) {
   const w = window.open(doc.output('bloburl'), '_blank');
   if (!w) { toast('Popup block hai - PDF download ho raha hai'); doc.save('BigNet-Print.pdf'); }
 }
-// Print dialog: customer name (and an optional note) can be edited before printing.
+// Print dialog: customer name, fees aur note print se pehle edit ho sakte hain.
 function printDialog(kind, rec) {
   const base = kind === 'bill' ? billData(rec) : receiptData(rec);
   const el = modal(`<h2>${kind === 'bill' ? 'Print bill' : 'Print receipt'}</h2>
-    <p class="muted">Print se pehle customer ka naam badal sakte hain. Ye tabdeeli sirf is print par hogi, customer record mein nahi.</p>
-    <div class="field" style="margin-top:14px"><label>Customer name (print par)</label><input id="pName" value="${esc(base.name)}"></div>
+    <p class="muted">Naam aur fees print se pehle badal sakte hain. Ye tabdeeli sirf is print par hogi, customer ya bill ke record mein nahi.</p>
+    <div class="formgrid" style="margin-top:14px"><div class="field"><label>Customer name</label><input id="pName" value="${esc(base.name)}"></div>
+    <div class="field"><label>Fees (Rs.)</label><input id="pFee" type="number" min="0" step="1" value="${base.fee}"></div></div>
     <div class="field" style="margin-top:12px"><label>Note / due date (optional)</label><input id="pNote" placeholder="e.g. Last date: 10 ${monthLabel(today().slice(0, 7))}"></div>
     <div class="notice info">PDF mein naam English/Roman likhein - Urdu script PDF mein sahi nazar nahi aati.</div>
     <div class="modal-actions"><button class="secondary" data-close>Close</button><button class="secondary" id="pDl">${ic('download')} Download PDF</button><button id="pPrint">${ic('printer')} Print</button></div>`);
-  const build = () => { const d = { ...base, name: el.querySelector('#pName').value.trim() || base.name, note: el.querySelector('#pNote').value.trim() }; return makeDoc([d]); };
+  const build = () => {
+    const feeText = el.querySelector('#pFee').value.trim(), fee = Number(feeText);
+    const d = { ...base, name: el.querySelector('#pName').value.trim() || base.name, fee: feeText !== '' && Number.isFinite(fee) && fee >= 0 ? fee : base.fee, note: el.querySelector('#pNote').value.trim() };
+    return makeDoc([d]);
+  };
   el.querySelector('#pPrint').onclick = () => printDoc(build());
   el.querySelector('#pDl').onclick = () => build().save(`BigNet-${kind}-${base.no}.pdf`);
 }
@@ -298,42 +302,60 @@ function dashboard() {
   const month = today().slice(0, 7), current = bills.filter(b => b.billing_month === month);
   const cnt = s => current.filter(b => statusFor(b) === s).length;
   const sumPay = f => payments.filter(f).reduce((s, p) => s + Number(p.amount), 0);
-  const outstanding = bills.reduce((s, b) => s + due(b), 0), pend = pendingList().length;
-  return `<div class="welcome"><div><h2>${esc(BRAND.name)} - Overview</h2><p>Monthly billing aur recovery ek nazar mein</p></div><span class="sync-state">${navigator.onLine ? '● Online' : '● Offline'} · ${offlineQueue().length} pending sync</span></div>
+  const outstanding = bills.reduce((s, b) => s + due(b), 0), pendAll = pendingList();
+  const billed = current.reduce((s, b) => s + Number(b.amount || 0), 0);
+  const got = current.reduce((s, b) => s + Math.min(Number(b.paid_amount || 0), Number(b.amount || 0)), 0);
+  const pct = billed > 0 ? Math.round(got / billed * 100) : 0;
+  const h = new Date().getHours(), hello = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  const dateText = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const recent = [...payments].sort((a, b) => String(b.paid_at).localeCompare(String(a.paid_at)) || String(b.created_at).localeCompare(String(a.created_at))).slice(0, 6);
+  const top = pendAll.slice(0, 5);
+  return `<div class="hero-banner"><div><h2>${hello}, ${esc((profile?.full_name || 'Admin').split(' ')[0])}</h2><p>${dateText} · ${esc(BRAND.name)}</p></div><span class="sync-state">${navigator.onLine ? '● Online' : '● Offline'} · ${offlineQueue().length} pending sync</span></div>
   <div class="grid">
     ${statCard('Total customers', customers.length.toLocaleString(), 'users')}
+    ${statCard("Today's collection", money(sumPay(p => String(p.paid_at).slice(0, 10) === today())), 'card', 'g')}
+    ${statCard('Monthly collection', money(sumPay(p => String(p.paid_at).slice(0, 7) === month)), 'trend')}
+    ${statCard('Outstanding balance', money(outstanding), 'alert', 'r')}
     ${statCard('Paid bills (this month)', cnt('Paid'), 'file', 'g')}
     ${statCard('Unpaid bills', cnt('Unpaid'), 'alert', 'o')}
     ${statCard('Partial bills', cnt('Partial'), 'file', 'p')}
-    ${statCard("Today's collection", money(sumPay(p => String(p.paid_at).slice(0, 10) === today())), 'card', 'g')}
-    ${statCard('Monthly collection', money(sumPay(p => String(p.paid_at).slice(0, 7) === month)), 'chart')}
-    ${statCard('Outstanding balance', money(outstanding), 'alert', 'r')}
-    ${statCard('Customers to remind', pend, 'bell', 'o')}
+    ${statCard('Customers to remind', pendAll.length, 'bell', 'o')}
   </div>
-  <div class="panel"><h3>Quick actions</h3><div class="actions">
-    ${isAdmin() ? `<button data-act="new-customer">${ic('plus')} Add customer</button><button class="secondary" data-act="import">${ic('upload')} Import from Excel</button><button class="secondary" data-act="generate">${ic('file')} Generate monthly bills</button>` : ''}
-    <button class="secondary" data-act="collect">${ic('card')} Receive payment</button>
-    <button class="wa" data-act="nav" data-page="reminders">${ic('wa')} Fee reminders</button>
-    <button class="secondary" data-act="sync">${ic('refresh')} Sync pending payments (${offlineQueue().length})</button></div></div>`;
+  <div class="grid g2">
+    <div class="panel"><h3>${ic('chart')} ${monthLabel(month)} recovery</h3>
+      <div class="prog-top"><strong>${pct}%</strong><span class="muted">of this month's bills collected</span></div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="prog-stats"><div><small>Billed</small><b>${money(billed)}</b></div><div><small>Collected</small><b style="color:var(--green)">${money(got)}</b></div><div><small>Remaining</small><b style="color:var(--red)">${money(Math.max(0, billed - got))}</b></div></div>
+    </div>
+    <div class="panel"><h3>${ic('plus')} Quick actions</h3><div class="qa">
+      <button data-act="collect">${ic('card')} Receive payment</button>
+      ${isAdmin() ? `<button class="secondary" data-act="new-customer">${ic('plus')} Add customer</button><button class="secondary" data-act="import">${ic('upload')} Import from Excel</button><button class="secondary" data-act="generate">${ic('file')} Generate monthly bills</button>` : ''}
+      <button class="wa" data-act="nav" data-page="reminders">${ic('wa')} Fee reminders</button>
+      <button class="secondary" data-act="sync">${ic('refresh')} Sync pending payments (${offlineQueue().length})</button></div></div>
+  </div>
+  <div class="grid g2">
+    <div class="panel"><h3>${ic('card')} Recent payments</h3><div class="table-wrap"><table><thead><tr><th>Customer</th><th>Amount</th><th>Date</th><th>Method</th></tr></thead><tbody>${recent.map(p => `<tr><td><b>${esc(p.customers?.name || 'Customer')}</b></td><td>${money(p.amount)}</td><td>${esc(String(p.paid_at).slice(0, 10))}</td><td>${esc(p.method || '')}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Abhi koi payment nahi</td></tr>'}</tbody></table></div></div>
+    <div class="panel"><h3>${ic('alert')} Highest pending balances</h3><div class="table-wrap"><table><thead><tr><th>Customer</th><th>Balance</th><th></th></tr></thead><tbody>${top.map(e => `<tr><td><b>${esc(e.c.name)}</b><br><small class="muted">${esc(e.c.area || '')}</small></td><td><span class="pill unpaid">${money(e.balance)}</span></td><td><button class="sm" data-act="collect" data-cid="${e.c.id}">Collect</button></td></tr>`).join('') || '<tr><td colspan="3" class="empty">Kisi customer ka baqaya nahi</td></tr>'}</tbody></table></div></div>
+  </div>`;
 }
 
 /* customers */
 function filteredCustomers() {
   const q = ui.custQ.toLowerCase();
-  return customers.filter(c => (!ui.custArea || c.area === ui.custArea) && (!q || [c.name, c.username, c.phone, c.customer_code].some(v => String(v || '').toLowerCase().includes(q))));
+  return customers.filter(c => (!ui.custArea || c.area === ui.custArea) && (!q || [c.name, c.username, c.phone, c.customer_code, c.address].some(v => String(v || '').toLowerCase().includes(q))));
 }
 function customerTable() {
   const all = filteredCustomers(), list = all.slice(0, LIMIT);
-  return `<div class="table-wrap"><table><thead><tr><th>Customer</th><th>Username</th><th>Area</th><th>Package</th><th>Monthly fee</th><th>Phone</th><th>Balance</th><th>Actions</th></tr></thead><tbody>${list.map(c => {
+  return `<div class="table-wrap"><table><thead><tr><th>Customer</th><th>Username</th><th>Area</th><th>Address</th><th>Package</th><th>Monthly fee</th><th>Phone</th><th>Balance</th><th>Actions</th></tr></thead><tbody>${list.map(c => {
     const bal = balances.get(c.id) || 0;
-    return `<tr><td><b>${esc(c.name)}</b><br><small class="muted">${esc(c.customer_code || '')}</small></td><td>${esc(c.username)}</td><td>${esc(c.area || '-')}</td><td>${esc(c.package_name || '-')}</td><td>${money(c.monthly_fee)}</td><td>${esc(c.phone || '-')}</td><td>${bal > 0 ? `<span class="pill unpaid">${money(bal)}</span>` : '<span class="pill paid">Clear</span>'}</td>
+    return `<tr><td><b>${esc(c.name)}</b><br><small class="muted">${esc(c.customer_code || '')}</small></td><td>${esc(c.username)}</td><td>${esc(c.area || '-')}</td><td class="addr" title="${esc(c.address || '')}">${esc(c.address || '-')}</td><td>${esc(c.package_name || '-')}</td><td>${money(c.monthly_fee)}</td><td>${esc(c.phone || '-')}</td><td>${bal > 0 ? `<span class="pill unpaid">${money(bal)}</span>` : '<span class="pill paid">Clear</span>'}</td>
     <td><div class="btns"><button class="secondary sm" data-act="profile" data-id="${c.id}">Profile</button>${isAdmin() ? `<button class="secondary sm" data-act="edit-customer" data-id="${c.id}">Edit</button>` : ''}<button class="sm" data-act="collect" data-cid="${c.id}">Collect</button>${bal > 0 ? `<button class="wa sm" title="WhatsApp reminder" data-act="wa" data-id="${c.id}">${ic('wa')}</button>` : ''}</div></td></tr>`;
-  }).join('') || '<tr><td colspan="8" class="empty">Koi customer nahi mila</td></tr>'}</tbody></table></div>${all.length > LIMIT ? `<div class="more">Pehle ${LIMIT} / ${all.length} customers dikhaye ja rahe hain - search ya area filter use karein.</div>` : ''}`;
+  }).join('') || '<tr><td colspan="9" class="empty">Koi customer nahi mila</td></tr>'}</tbody></table></div>${all.length > LIMIT ? `<div class="more">Pehle ${LIMIT} / ${all.length} customers dikhaye ja rahe hain - search ya area filter use karein.</div>` : ''}`;
 }
 const areaOptions = sel => areas.map(a => `<option ${sel === a.name ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
 function customersPage() {
   return head('Customers', `${customers.length.toLocaleString()} subscriber records`, isAdmin() ? `<button class="secondary" data-act="import">${ic('upload')} Import from Excel</button><button data-act="new-customer">${ic('plus')} Add customer</button>` : '') +
-    `<div class="toolbar"><input data-f="custQ" value="${esc(ui.custQ)}" placeholder="Search name, username, phone or ID"><select data-f="custArea"><option value="">All areas</option>${areaOptions(ui.custArea)}</select></div><div class="panel" style="margin-top:0" id="list">${customerTable()}</div>`;
+    `<div class="toolbar"><input data-f="custQ" value="${esc(ui.custQ)}" placeholder="Search name, username, phone, address or ID"><select data-f="custArea"><option value="">All areas</option>${areaOptions(ui.custArea)}</select></div><div class="panel" style="margin-top:0" id="list">${customerTable()}</div>`;
 }
 
 /* billing */
@@ -423,7 +445,7 @@ function customerProfile(c) {
   if (!c) return;
   const cb = bills.filter(b => b.customer_id === c.id), cp = payments.filter(p => p.customer_id === c.id), bal = balances.get(c.id) || 0;
   const el = modal(`<h2>${esc(c.name)}</h2><p class="muted">Customer ledger aur service profile</p>
-    <div class="profile-grid"><div><small>PPPoE username</small><b>${esc(c.username)}</b></div><div><small>Customer ID</small><b>${esc(c.customer_code || '-')}</b></div><div><small>Package</small><b>${esc(c.package_name || '-')}</b></div><div><small>Monthly fee</small><b>${money(c.monthly_fee)}</b></div><div><small>Area / phone</small><b>${esc(c.area || '-')} · ${esc(c.phone || '-')}</b></div><div><small>Outstanding</small><b>${money(bal)}</b></div></div>
+    <div class="profile-grid"><div><small>PPPoE username</small><b>${esc(c.username)}</b></div><div><small>Customer ID</small><b>${esc(c.customer_code || '-')}</b></div><div><small>Package</small><b>${esc(c.package_name || '-')}</b></div><div><small>Monthly fee</small><b>${money(c.monthly_fee)}</b></div><div><small>Area / phone</small><b>${esc(c.area || '-')} · ${esc(c.phone || '-')}</b></div><div><small>Outstanding</small><b>${money(bal)}</b></div><div style="grid-column:1/-1"><small>Address</small><b>${esc(c.address || '-')}</b></div></div>
     <h3>Bill history</h3><div class="table-wrap"><table><thead><tr><th>Month</th><th>Bill</th><th>Received</th><th>Status</th><th></th></tr></thead><tbody>${cb.map(b => `<tr><td>${monthLabel(b.billing_month)}</td><td>${money(b.amount)}</td><td>${money(b.paid_amount)}</td><td><span class="pill ${statusFor(b).toLowerCase()}">${statusFor(b)}</span></td><td><button class="secondary sm" data-act="print-bill" data-id="${b.id}">${ic('printer')} Print</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Koi bill nahi</td></tr>'}</tbody></table></div>
     <h3 style="margin-top:16px">Payment history</h3><div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th></tr></thead><tbody>${cp.map(p => `<tr><td>${esc(String(p.paid_at).slice(0, 10))}</td><td>${money(p.amount)}</td><td>${esc(p.method)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">Abhi koi payment nahi</td></tr>'}</tbody></table></div>
     <div class="modal-actions">${bal > 0 ? `<button class="wa" data-act="wa" data-id="${c.id}">${ic('wa')} WhatsApp reminder</button>` : ''}<button data-act="collect" data-cid="${c.id}">Receive payment</button><button class="secondary" data-close>Close</button></div>`);
@@ -436,13 +458,13 @@ function customerModal(c = null) {
   const el = modal(`<h2>${editing ? 'Edit' : 'Add'} customer</h2><form id="customerForm"><div class="formgrid" style="margin-top:14px">
     ${f('name', 'Customer name', 'text', true)}${f('customer_code', 'Customer ID')}${f('username', 'PPPoE username', 'text', true)}${f('phone', 'Mobile number (03xx...)')}
     <div class="field"><label>Area</label><select name="area"><option value="">Select area</option>${areas.map(a => `<option value="${esc(a.name)}" ${c?.area === a.name ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
-    ${f('package_name', 'Package')}${f('monthly_fee', 'Monthly charges', 'number', true)}${f('father_name', 'Father name')}</div>
+    ${f('package_name', 'Package')}${f('monthly_fee', 'Monthly charges', 'number', true)}${f('father_name', 'Father name')}<div class="field" style="grid-column:1/-1"><label>Address</label><input name="address" value="${esc(c?.address ?? '')}" placeholder="Ghar / gali / mohalla"></div></div>
     <div class="modal-actions"><button type="button" class="secondary" data-close>Cancel</button><button>Save customer</button></div></form>`);
   el.querySelector('form').onsubmit = async e => {
     e.preventDefault();
     const d = Object.fromEntries(new FormData(e.target));
     for (const k of Object.keys(d)) d[k] = typeof d[k] === 'string' ? d[k].trim() : d[k];
-    for (const k of ['customer_code', 'phone', 'area', 'package_name', 'father_name']) if (d[k] === '') d[k] = null; // blank code must be NULL (unique column)
+    for (const k of ['customer_code', 'phone', 'area', 'package_name', 'father_name', 'address']) if (d[k] === '') d[k] = null; // blank code must be NULL (unique column)
     d.monthly_fee = Number(d.monthly_fee); d.updated_at = new Date().toISOString();
     const r = editing ? await sb.from('customers').update(d).eq('id', c.id) : await sb.from('customers').insert(d);
     if (r.error) return toast(r.error.message);
@@ -484,6 +506,7 @@ const ALIASES = {
   username: ['username', 'pppoe', 'pppoeusername', 'user', 'userid', 'login', 'loginid'],
   phone: ['phone', 'mobile', 'mobileno', 'mobilenumber', 'phoneno', 'phonenumber', 'contact', 'contactno', 'whatsapp', 'cell'],
   area: ['area', 'location', 'zone', 'town', 'village'],
+  address: ['address', 'homeaddress', 'fulladdress', 'customeraddress', 'residence', 'pata'],
   package_name: ['package', 'packagename', 'plan', 'speed'],
   monthly_fee: ['fee', 'fees', 'monthlyfee', 'monthlycharges', 'charges', 'amount', 'bill', 'price', 'monthlybill'],
   customer_code: ['id', 'customerid', 'customercode', 'code', 'accountno', 'accountnumber', 'clientid'],
@@ -514,7 +537,7 @@ function validateImport(rawRows) {
     if (Object.values(raw).every(v => String(v).trim() === '')) return; // blank line
     const feeText = String(m.monthly_fee ?? '').replace(/[^\d.]/g, '');
     const r = {
-      line: i + 2, name: String(m.name ?? '').trim(), username: String(m.username ?? '').trim(), phone: cleanPhone(m.phone), area: String(m.area ?? '').trim(),
+      line: i + 2, name: String(m.name ?? '').trim(), username: String(m.username ?? '').trim(), phone: cleanPhone(m.phone), area: String(m.area ?? '').trim(), address: String(m.address ?? '').trim(),
       package_name: String(m.package_name ?? '').trim(), customer_code: String(m.customer_code ?? '').trim(), father_name: String(m.father_name ?? '').trim(),
       feeBlank: feeText === '', fee: feeText === '' ? 0 : Number(feeText), error: ''
     };
@@ -530,11 +553,11 @@ function validateImport(rawRows) {
 }
 function downloadTemplate() {
   const ws = XLSX.utils.aoa_to_sheet([
-    ['Customer ID', 'Name', 'Father Name', 'Username', 'Mobile', 'Area', 'Package', 'Monthly Fee'],
-    ['1001', 'Ali Khan', 'Muhammad Khan', 'ali.khan', '03001234567', 'Saddiqabad', '10 Mbps', 1500],
-    ['1002', 'Ahmed Raza', 'Raza Ali', 'ahmed.raza', '03211234567', 'Rahim Yar Khan', '5 Mbps', 1000]
+    ['Customer ID', 'Name', 'Father Name', 'Username', 'Mobile', 'Area', 'Address', 'Package', 'Monthly Fee'],
+    ['1001', 'Ali Khan', 'Muhammad Khan', 'ali.khan', '03001234567', 'Saddiqabad', 'House 12, Main Bazar', '10 Mbps', 1500],
+    ['1002', 'Ahmed Raza', 'Raza Ali', 'ahmed.raza', '03211234567', 'Rahim Yar Khan', 'Street 4, Model Town', '5 Mbps', 1000]
   ]);
-  ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 18 }, { wch: 15 }, { wch: 18 }, { wch: 14 }, { wch: 13 }];
+  ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 18 }, { wch: 15 }, { wch: 18 }, { wch: 28 }, { wch: 14 }, { wch: 13 }];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Customers');
   XLSX.writeFile(wb, 'BigNet-Customers-Template.xlsx');
 }
@@ -542,7 +565,7 @@ function importModal() {
   if (!isAdmin()) return toast('Sirf admin import kar sakta hai');
   const el = modal(''), body = el.querySelector('.modal');
   const step1 = () => {
-    body.innerHTML = `<h2>Excel se customers import karein</h2><p class="muted">.xlsx, .xls ya .csv file. Pehli row mein column ke naam hon (Name, Username, Mobile, Area, Package, Monthly Fee, Customer ID, Father Name).</p>
+    body.innerHTML = `<h2>Excel se customers import karein</h2><p class="muted">.xlsx, .xls ya .csv file. Pehli row mein column ke naam hon (Name, Username, Mobile, Area, Address, Package, Monthly Fee, Customer ID, Father Name).</p>
       <div class="notice info">Zaroori columns: <b>Name</b> aur <b>Username</b>. Jo username pehle se maujood hai uski details update ho sakti hain. Naye Areas khud ban jate hain.</div>
       <div class="dropzone"><b>Excel file select karein</b><br><input type="file" id="impFile" accept=".xlsx,.xls,.csv"></div>
       <div class="modal-actions" style="justify-content:space-between"><button class="secondary" id="tplBtn">${ic('download')} Sample template download</button><button class="secondary" data-close>Close</button></div>`;
@@ -560,7 +583,7 @@ function importModal() {
     const bad = rows.filter(r => r.error).length, upd = rows.filter(r => !r.error && r.existing).length, fresh = rows.filter(r => !r.error && !r.existing).length;
     body.innerHTML = `<h2>Import preview</h2><p class="muted">${esc(fname)} - ${rows.length} rows</p>
       <div class="sumrow"><span class="pill new">${fresh} naye</span><span class="pill upd">${upd} already maujood</span><span class="pill err">${bad} errors</span></div>
-      <div class="table-wrap" style="max-height:300px"><table><thead><tr><th>#</th><th>Name</th><th>Username</th><th>Mobile</th><th>Area</th><th>Fee</th><th>Status</th></tr></thead><tbody>${rows.slice(0, 100).map(r => `<tr><td>${r.line}</td><td>${esc(r.name)}</td><td>${esc(r.username)}</td><td>${esc(r.phone)}</td><td>${esc(r.area)}</td><td>${r.feeBlank ? '-' : money(r.fee)}</td><td>${r.error ? `<span class="pill err">${esc(r.error)}</span>` : r.existing ? '<span class="pill upd">Update</span>' : '<span class="pill new">New</span>'}</td></tr>`).join('')}</tbody></table></div>
+      <div class="table-wrap" style="max-height:300px"><table><thead><tr><th>#</th><th>Name</th><th>Username</th><th>Mobile</th><th>Area</th><th>Address</th><th>Fee</th><th>Status</th></tr></thead><tbody>${rows.slice(0, 100).map(r => `<tr><td>${r.line}</td><td>${esc(r.name)}</td><td>${esc(r.username)}</td><td>${esc(r.phone)}</td><td>${esc(r.area)}</td><td>${esc(r.address)}</td><td>${r.feeBlank ? '-' : money(r.fee)}</td><td>${r.error ? `<span class="pill err">${esc(r.error)}</span>` : r.existing ? '<span class="pill upd">Update</span>' : '<span class="pill new">New</span>'}</td></tr>`).join('')}</tbody></table></div>
       ${rows.length > 100 ? `<div class="more">Pehli 100 rows dikhayi gayi hain. Baqi bhi import hongi.</div>` : ''}
       <div class="formgrid" style="margin-top:14px"><div class="field"><label>Jo customers pehle se hain</label><select id="impMode"><option value="update">Unki details update karein</option><option value="skip">Chhor dein (skip)</option></select></div>
       <div class="field"><label>Is mahine ka bill</label><select id="impBills"><option value="yes">Naye customers ka bill bana dein</option><option value="no">Abhi na banayein</option></select></div></div>
@@ -580,7 +603,7 @@ function importModal() {
         const ex = r.existing, now = new Date().toISOString();
         return {
           customer_code: r.customer_code || ex?.customer_code || null, name: r.name, father_name: r.father_name || ex?.father_name || null, username: r.username,
-          phone: r.phone || ex?.phone || null, area: r.area || ex?.area || null, package_name: r.package_name || ex?.package_name || null,
+          phone: r.phone || ex?.phone || null, area: r.area || ex?.area || null, address: r.address || ex?.address || null, package_name: r.package_name || ex?.package_name || null,
           monthly_fee: r.feeBlank && ex ? Number(ex.monthly_fee) : r.fee, updated_at: now
         };
       });
@@ -674,21 +697,45 @@ window.addEventListener('offline', () => toast('Offline mode: nayi payments is d
 document.documentElement.dataset.theme = localStorage.getItem('isp-theme') || 'light';
 
 function renderLogin() {
-  app.innerHTML = `<div class="login-bg"><div class="login">${brandHtml()}<h2>Sign in</h2><p class="muted" style="margin:6px 0 18px">Apne ${esc(BRAND.name)} account se login karein.</p>
-    <form id="login"><label>Email</label><input name="email" type="email" required placeholder="admin@example.com"><label>Password</label><input name="password" type="password" required placeholder="Password"><button>Sign in</button></form>
-    <div class="notice">${configured ? 'Pehle Supabase Authentication mein user banayein, phir sign in karein.' : 'Setup zaroori hai: .env file mein Supabase URL aur anon key daalein. SETUP.md dekhein.'}</div><p id="loginError" style="color:#c0392b"></p>
-    <div class="foot">Complaint &amp; Support: ${esc(BRAND.supportName)} ${esc(BRAND.supportPhone)}</div></div></div>`;
+  const feat = (i, t) => `<div><span class="fi">${ic(i)}</span>${t}</div>`;
+  app.innerHTML = `<div class="auth">
+    <section class="auth-hero">${brandHtml()}
+      <div class="hero-body"><h1>Billing, collection aur recovery - ek hi jagah.</h1>
+        <p class="lead">Customer records, monthly bills, payment receipts aur fee reminders ko asaani se manage karein - PC aur mobile dono par.</p>
+        <div class="feat">${feat('users', 'Customer records aur area-wise management')}${feat('card', 'Fast payment collection aur printable receipts')}${feat('chart', 'Collector-wise recovery reports')}${feat('wa', 'WhatsApp fee reminders')}</div></div>
+      <small class="copy">&copy; ${new Date().getFullYear()} ${esc(BRAND.name)}</small>
+    </section>
+    <section class="auth-panel"><div class="auth-card">
+      <h2>Welcome back</h2><p class="muted sub">Apne account se sign in karein.</p>
+      <form id="login" autocomplete="on">
+        <div class="field"><label for="lEmail">Email</label><div class="inp">${ic('mail')}<input id="lEmail" name="email" type="email" autocomplete="username" required placeholder="you@example.com"></div></div>
+        <div class="field"><label for="lPass">Password</label><div class="inp">${ic('lock')}<input id="lPass" name="password" type="password" autocomplete="current-password" required placeholder="Password"><button type="button" class="eye" aria-label="Show password" id="eyeBtn">${ic('eye')}</button></div></div>
+        <p id="loginError" class="form-err" role="alert"></p>
+        <button class="signin" id="signBtn">Sign in</button>
+      </form>
+      ${configured ? '' : '<div class="notice">Setup mukammal nahi hai: .env file check karein (SETUP.md).</div>'}
+      <div class="foot">Complaint &amp; Support<br><b>${esc(BRAND.supportName)} ${esc(BRAND.supportPhone)}</b></div>
+    </div></section></div>`;
+  const pass = $('#lPass'), eye = $('#eyeBtn'), btn = $('#signBtn'), err = $('#loginError');
+  eye.onclick = () => { const show = pass.type === 'password'; pass.type = show ? 'text' : 'password'; eye.innerHTML = ic(show ? 'eyeoff' : 'eye'); eye.setAttribute('aria-label', show ? 'Hide password' : 'Show password'); };
   $('#login').onsubmit = async e => {
-    e.preventDefault(); if (!sb) return;
-    const { error } = await sb.auth.signInWithPassword(Object.fromEntries(new FormData(e.target)));
-    if (error) $('#loginError').textContent = error.message; else await start();
+    e.preventDefault(); if (!sb) { err.textContent = 'Setup mukammal nahi hai.'; return; }
+    err.textContent = ''; btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Signing in...';
+    try {
+      const { error } = await sb.auth.signInWithPassword(Object.fromEntries(new FormData(e.target)));
+      if (error) throw error;
+      await start();
+    } catch (ex) {
+      err.textContent = /invalid login/i.test(ex.message) ? 'Email ya password ghalat hai.' : ex.message;
+      btn.disabled = false; btn.textContent = 'Sign in';
+    }
   };
 }
 async function start() {
   const { data: { session: s } } = await sb.auth.getSession(); session = s; if (!session) return renderLogin();
   const { data: p, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   if (error) {
-    app.innerHTML = `<div class="login-bg"><div class="login">${brandHtml()}<h2>Account profile missing</h2><p>SQL setup script chalayein aur is user ka profile banayein.</p><button data-act="logout">Sign out</button></div></div>`;
+    app.innerHTML = `<div class="login-bg"><div class="login">${brandHtml()}<h2>Account access nahi mila</h2><p class="muted">Is account ko abhi access nahi diya gaya. Admin se rabta karein.</p><button data-act="logout">Sign out</button></div></div>`;
     return;
   }
   profile = p; await loadData(); await autoGenerateCurrentMonthBills(); render();

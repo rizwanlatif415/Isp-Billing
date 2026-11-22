@@ -1,4 +1,4 @@
-# BigNet Broadband — Billing & Recovery Manager (Phase 3)
+# BigNet Broadband — Billing & Recovery Manager (Phase 4)
 
 Responsive ISP billing PWA for PC and mobile. Includes customer records, monthly bills, payment collection, customer ledger, PDF receipts, collector attribution, recovery reports, light/dark theme, role-based access and an offline payment queue.
 
@@ -71,3 +71,10 @@ Monthly bills are generated automatically the first time an Admin signs in durin
 - **WhatsApp reminders:** Reminders page lists every customer with pending fees. The WhatsApp button opens a chat with an auto-written message (name, pending months, balance, support number). Edit the message under *Reminder message template*. Mobile numbers are accepted as 03xx..., +92... or 92...
 - **Printing:** Bills and receipts print on a 210x100 mm slip (bulk print: 3 bills per A4 page). Before printing you can edit the customer name and add a note; the edit applies to the print only.
 - **No database change:** `supabase/schema.sql` is unchanged from Phase 2.
+
+## 8. Phase 4 changes
+- **Professional login page** aur naya **dashboard** (recovery progress, recent payments, highest pending balances).
+- **Customer address:** Customers list, profile, Add/Edit form aur Excel import (column `Address`) mein address shamil hai.
+  **Zaroori:** purane database par `supabase/phase4-address.sql` Supabase SQL Editor mein *ek dafa* run karein, warna customer save/import par error aayega.
+- **Bill / receipt print:** ab sirf **customer ka naam** aur **fees** print hoti hai (area, phone, username, package nahi). Print se pehle **naam aur fees dono edit** ho sakte hain; ye tabdeeli sirf print par hoti hai, database mein nahi.
+- Bill par fees ka default: baqaya (is mahine + pichla) agar kuch baqi hai, warna mahine ki fee.

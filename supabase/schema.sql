@@ -141,3 +141,6 @@ begin
 end $$;
 revoke all on function public.record_payment(uuid,uuid,numeric,date,text,text,text) from public;
 grant execute on function public.record_payment(uuid,uuid,numeric,date,text,text,text) to authenticated;
+
+-- Phase 4: customer address (safe to run more than once)
+alter table public.customers add column if not exists address text;
